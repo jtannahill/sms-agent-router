@@ -1,0 +1,9 @@
+# Copy to .dev.vars for `wrangler dev`. In production use `wrangler secret put`.
+TWILIO_AUTH_TOKEN=
+OWNER_NUMBERS=+12125550100
+GROK_URL=
+GROK_SECRET=
+CLAUDE_URL=
+CLAUDE_KEY=
+# PIN=4821
+# TWILIO_VERIFY=false   # local testing only; never in production

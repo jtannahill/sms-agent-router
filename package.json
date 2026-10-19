@@ -1,0 +1,14 @@
+{
+  "name": "sms-agent-router",
+  "version": "0.1.0",
+  "description": "Text a Twilio number and route each message to the AI agent you name: \"grok ...\", \"claude ...\". A zero-dependency Cloudflare Worker.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "engines": { "node": ">=20" }
+}
