@@ -17,7 +17,7 @@ if (!url || !from || !words.length || !token) {
 }
 
 const params = {
-  MessageSid: `SMtest${Date.now()}`,
+  MessageSid: `SM${crypto.randomUUID().replace(/-/g, '')}`,
   From: from,
   To: '+15005550006',
   Body: words.join(' '),

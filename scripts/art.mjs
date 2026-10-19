@@ -79,8 +79,7 @@ function frame(theme, vw, vh, body, title) {
 `;
 }
 
-// The CSS delay shifts each element's whole loop; to keep one shared loop the
-// delays are negative offsets from the end, so everything restarts together.
+// Start times in seconds within the shared loop.
 const at = (s) => s;
 
 function wide(theme) {

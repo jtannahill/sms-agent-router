@@ -17,8 +17,8 @@ ROUTES = '''
   { "name": "claude", "prefix": "claude", "url_env": "CLAUDE_URL", "auth": "bearer",            "key_env": "CLAUDE_KEY", "payload": "text" }
 ]
 '''
-# Optional: text back after routing, e.g. "Sent to {agent}". Empty = silent.
-# Each reply is an outbound SMS that Twilio bills.
+# Optional: text back as soon as a text is routed (before the agent answers),
+# e.g. "Routing to {agent}". Empty = silent. Each reply is a billed SMS.
 ACK = ""
 # REPLY_ON_NO_MATCH = "false"          # stay silent when no prefix matches
 # PUBLIC_URL = "https://sms.example.com"  # only behind a custom domain or proxy

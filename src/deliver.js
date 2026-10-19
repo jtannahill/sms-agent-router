@@ -44,10 +44,26 @@ export function buildPayload(kind, msg) {
 
 export async function standardWebhookHeaders(secret, body, { now = Date.now(), id } = {}) {
   const key = base64ToBytes(secret.replace(/^whsec_/, ''));
+  if (key.length < 24 || key.length > 64) throw new RangeError('signing secret must decode to 24-64 bytes');
   const msgId = id || `msg_${crypto.randomUUID().replace(/-/g, '')}`;
   const timestamp = String(Math.floor(now / 1000));
   const sig = await hmacBase64('SHA-256', key, `${msgId}.${timestamp}.${body}`);
   return { 'webhook-id': msgId, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${sig}` };
+}
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+// Route URLs often work like passwords, so errors name the setting, never the value.
+export function checkUrl(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return 'is not a valid URL';
+  }
+  if (u.protocol === 'https:') return null;
+  if (u.protocol === 'http:' && LOCAL_HOSTS.has(u.hostname)) return null; // local testing only
+  return 'must be an https URL';
 }
 
 // Never throws. Returns { route, ok, status?, error? }. Errors never include
@@ -56,6 +72,8 @@ export async function deliver(route, msg, env, { fetchImpl = fetch, now = Date.n
   const url = env[route.urlEnv];
   const key = route.keyEnv ? env[route.keyEnv] : null;
   if (!url) return { route: route.name, ok: false, error: `${route.urlEnv} is not set` };
+  const bad = checkUrl(url);
+  if (bad) return { route: route.name, ok: false, error: `${route.urlEnv} ${bad}` };
   if (route.auth !== 'none' && !key) return { route: route.name, ok: false, error: `${route.keyEnv} is not set` };
 
   try {
@@ -66,7 +84,7 @@ export async function deliver(route, msg, env, { fetchImpl = fetch, now = Date.n
       try {
         Object.assign(headers, await standardWebhookHeaders(key, body, { now: now() }));
       } catch {
-        return { route: route.name, ok: false, error: `${route.keyEnv} is not a valid whsec_ base64 secret` };
+        return { route: route.name, ok: false, error: `${route.keyEnv} is not a valid whsec_ secret (base64, 24-64 bytes)` };
       }
     }
     if (CLAUDE_ROUTINE.test(url)) {
@@ -79,6 +97,7 @@ export async function deliver(route, msg, env, { fetchImpl = fetch, now = Date.n
     if (!res.ok) return { route: route.name, ok: false, status: res.status, error: 'rejected' };
     return { route: route.name, ok: true, status: res.status };
   } catch (err) {
-    return { route: route.name, ok: false, error: err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS} ms` : err.message };
+    // Never err.message: fetch errors can quote the URL.
+    return { route: route.name, ok: false, error: err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS} ms` : `request failed (${err.name})` };
   }
 }

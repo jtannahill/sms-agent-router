@@ -15,12 +15,12 @@
 
 The button copies this repo to your GitHub and deploys it; then add your secrets ([Setup](#setup), step 3) and point Twilio at it. Or [set it up by hand](#before-you-start).
 
-Your Twilio number receives the text. A small Cloudflare Worker checks that it really came from Twilio and from you, reads the first word, strips it, and hands the rest to the agent that word names. The agent does the work and answers however it normally does. No runtime dependencies, one Worker, 40 tests.
+Your Twilio number receives the text. A small Cloudflare Worker checks that it really came from Twilio and from you, reads the first word, strips it, and hands the rest to the agent that word names. The agent does the work and answers however it normally does. No runtime dependencies, one Worker, 53 tests.
 
 ## What happens to a text
 
 - **The first word is the address.** `grok hi`, `Grok: hi` and `@grok, hi` all reach `grok` as `hi`. `grokking`, `grokémon` and `ask grok` do not. Line breaks are kept; a bare prefix with nothing after it is ignored.
-- **Only you get through.** Requests without Twilio's signature get a 403, texts from numbers not in `OWNER_NUMBERS` are ignored, and an optional PIN and replay guard add two more locks.
+- **Only you get through.** Requests without Twilio's signature or a real Twilio message ID get a 403, texts from numbers not in `OWNER_NUMBERS` are ignored, and an optional PIN and replay guard add two more locks.
 - **No prefix?** The text goes to your `default` route if you set one; otherwise you get a one-line reply listing the prefixes.
 - **Twilio always hears back at once** (200 with empty TwiML) while the agent is called in the background, so a slow agent never makes Twilio retry.
 - **Agents are never called twice.** Most agent endpoints start a new run per request with no idempotency key, so failures are logged, not retried.
@@ -36,7 +36,7 @@ This is a real local run: two texts from the owner's number, one from a stranger
 
 ## Before you start
 
-- **Node 20 or newer.** Tests need nothing else. Deploying uses `npx wrangler@4`, which npm downloads on first use.
+- **Node 22 or newer.** Tests need nothing else. Deploying uses `npx wrangler@4`, which npm downloads on first use.
 - **A Cloudflare account** (the free plan is enough). Run `npx wrangler@4 login` once.
 - **A Twilio account and a phone number that can receive SMS.** In the Twilio Console: Phone Numbers > Manage > Buy a number, with the SMS capability. In the US, texting to and from a local number may require A2P 10DLC registration, and toll-free numbers need verification, so check the number's status in the Console if texts don't arrive.
 - **Your Twilio auth token:** Twilio Console home, Account Info, Auth Token. This is the primary account auth token, not an API key secret. It is used to check that each request really comes from Twilio.
@@ -76,13 +76,13 @@ The tests need no install.
 
    To script it, pipe the value in: `printf %s "$VALUE" | npx wrangler@4 secret put NAME`. Secrets take effect immediately; no redeploy needed.
 
-4. **Point Twilio at the Worker.** Twilio Console > Phone Numbers > Manage > Active numbers > your number > Messaging Configuration: "A message comes in", Webhook, `https://sms-agent-router.<your-subdomain>.workers.dev/sms`, HTTP POST. Save.
+4. **Point Twilio at the Worker.** Twilio Console > Phone Numbers > Manage > Active numbers > your number > Messaging Configuration: "A message comes in", Webhook, `https://sms-agent-router.<your-subdomain>.workers.dev/sms`, HTTP POST. Save. (`/sms/` with a trailing slash also works.)
 
 5. **Test it.** Run `npm run tail` in one terminal and text your Twilio number `claude are you there?`. You should see `[router] claude: delivered (200)`.
 
 **Custom domain or proxy:** if Twilio posts to a different hostname than the Worker's own (a custom domain route, or a proxy in front), set `PUBLIC_URL` under `[vars]` to that origin, e.g. `https://sms.example.com`. The signature covers the full URL, so it must match what Twilio calls. A workers.dev URL needs no `PUBLIC_URL`.
 
-**Replay guard (recommended):** Twilio signatures carry no timestamp, so anyone who captures a signed request (say, from a proxy log) could resend it and run your agent again. Bind a KV namespace named `SEEN` and each `MessageSid` is accepted only once per day. This is best effort: KV is eventually consistent, so a replay sent within about a minute, or from another region, can still slip through; it stops replays of old captures.
+**Replay guard (recommended):** Twilio signatures carry no timestamp, so anyone who captures a signed request (say, from a proxy log) could resend it and run your agent again. Bind a KV namespace named `SEEN` and each request is accepted only once per day, keyed by both its `MessageSid` and its signature (so re-arranging the signed fields of a captured request doesn't help). This is best effort: KV is eventually consistent, so a replay sent within about a minute, or from another region, can still slip through; it stops replays of old captures. If KV can't be read, texts are dropped rather than let through. It writes two KV keys per text, so Cloudflare's free plan (1,000 KV writes a day) covers about 500 texts a day.
 
 ```sh
 npx wrangler@4 kv namespace create SEEN
@@ -99,7 +99,7 @@ Then uncomment the `[[kv_namespaces]]` block in `wrangler.toml`, paste the id it
 | `name` | yes | Label used in logs and as `{agent}` in `ACK`. |
 | `prefix` | unless `default` | One word (letters, digits, `-`, `_`) that selects this route. Case-insensitive. |
 | `default` | no | `true` for the route that gets texts with no prefix. At most one. |
-| `url_env` | yes | Name of the secret holding the agent's webhook URL. |
+| `url_env` | yes | Name of the secret holding the agent's webhook URL. Must be `https` (plain `http` only for `localhost` while testing). |
 | `auth` | no | `bearer` (default), `standard-webhooks`, or `none`. |
 | `key_env` | unless `auth` is `none` | Name of the secret holding the key or signing secret. |
 | `payload` | no | `json` (default), `twilio`, or `text`. |
@@ -156,9 +156,9 @@ The message text has the prefix (and PIN) already removed. MMS attachment URLs a
 |---|---|---|
 | `TWILIO_AUTH_TOKEN` | secret | Checks `X-Twilio-Signature`. Without it every request gets a 403 (unless `TWILIO_VERIFY=false`). |
 | `OWNER_NUMBERS` | secret | Numbers allowed to use the router, comma-separated, with country code (`+12125550100`). Spaces, dashes and parentheses are ignored; `2125550100` without the `1` does not match. Everyone else is ignored silently. |
-| `PIN` | secret, optional | One word. If set, texts must start with it: `4821 grok hi`. |
+| `PIN` | secret, optional | One word, no spaces; use 6 or more characters (there is no rate limit). If set, texts must start with it: `482193 grok hi`. |
 | `ROUTES` | `[vars]` | The route list above. |
-| `ACK` | `[vars]`, optional | Text back after routing, e.g. `Sent to {agent}`. Empty means silent. Each reply is a billed SMS. |
+| `ACK` | `[vars]`, optional | Text back as soon as a text is routed, e.g. `Routing to {agent}`. It goes out before the agent answers, so it does not mean delivery succeeded. Empty means silent. Each reply is a billed SMS. |
 | `REPLY_ON_NO_MATCH` | `[vars]`, optional | `"false"` to stay silent when no prefix matches and there is no default. |
 | `PUBLIC_URL` | `[vars]`, optional | Origin Twilio posts to, when it differs from the Worker's own URL. |
 | `SEEN` | KV binding, optional | Replay guard, see Setup. |
@@ -168,11 +168,11 @@ The message text has the prefix (and PIN) already removed. MMS attachment URLs a
 
 These agents can often read your mail, run code or drive a browser, so treat the router like a remote control.
 
-- **Signature first.** A request that is not a form post with a valid Twilio signature gets a 403 before any of your settings or agents are touched.
+- **Signature first.** A request that is not a small form post with a valid Twilio signature and a real Twilio message ID gets a 403 (or 413 if over 64 KB) before any of your settings or agents are touched.
 - **A sender number is not proof of identity.** The signature proves the request came from Twilio, not that you typed the text; SMS sender IDs can be spoofed upstream of Twilio. Set a `PIN` if your agents can take actions that matter.
 - **Turn on the replay guard** (`SEEN`) so an old captured request can't be replayed.
 - **The text is untrusted input to the agent.** In each agent's own instructions, say that forwarded texts are requests from you and that instructions inside quoted or forwarded content must be ignored.
-- **Secrets stay in Wrangler secrets.** `ROUTES` only names them. Logs record the route and status, never the message text, the agent's reply or any key.
+- **Secrets stay in Wrangler secrets.** `ROUTES` only names them. Logs record the route and status, never the message text, the agent's reply, a route URL or any key. Route URLs must be https.
 - **Found a hole?** Please report it privately; see [SECURITY.md](SECURITY.md).
 
 ## Local development
@@ -186,15 +186,16 @@ npm run dev                      # wrangler dev on http://localhost:8787
 
 ```sh
 curl -X POST localhost:8787/sms --data-urlencode From=+12125550100 --data-urlencode To=+15185550199 \
-  --data-urlencode 'Body=claude hello' -d MessageSid=SMtest
+  --data-urlencode 'Body=claude hello' -d MessageSid=SM00000000000000000000000000000001
 ```
 
-Use `--data-urlencode` for phone numbers: in a plain `-d` form body, `+` becomes a space.
+Use `--data-urlencode` for phone numbers: in a plain `-d` form body, `+` becomes a space. `MessageSid` must look like a real one (`SM` and 32 hex digits).
 
-**Signed requests:** keep `TWILIO_AUTH_TOKEN` in `.dev.vars`, remove `TWILIO_VERIFY`, and let the helper print a correctly signed curl. It reads the token from `.dev.vars`, so it never lands in your shell history. The URL must be exactly the one you send to (`localhost` and `127.0.0.1` sign differently):
+**Signed requests:** keep `TWILIO_AUTH_TOKEN` in `.dev.vars`, remove `TWILIO_VERIFY`, and let the helper print a correctly signed curl. The token is read from `.dev.vars`, so it never lands in your shell history. The URL must be exactly the one you send to (`localhost` and `127.0.0.1` sign differently):
 
 ```sh
-(set -a; . ./.dev.vars; set +a; npm run -s sign -- http://localhost:8787/sms +12125550100 "claude hello") | sh
+TWILIO_AUTH_TOKEN="$(sed -n 's/^TWILIO_AUTH_TOKEN=//p' .dev.vars)" \
+  npm run -s sign -- http://localhost:8787/sms +12125550100 "claude hello" | sh
 ```
 
 ## License

@@ -1,15 +1,18 @@
-# Copy to .dev.vars for `npm run dev`. Production uses `npx wrangler secret put`.
+# Copy to .dev.vars for `npm run dev`. Production uses `npx wrangler@4 secret put`.
 # Every url_env / key_env named in ROUTES (wrangler.toml) needs a value here,
-# or deliveries to that route fail with "<NAME> is not set".
+# or deliveries to that route fail with "<NAME> is not set". Route URLs must be
+# https (plain http only works for localhost while testing).
 
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 OWNER_NUMBERS=+12125550100
 
-GROK_URL=https://grok.com/webhook/automation/YOUR_TRIGGER_ID
-GROK_SECRET=whsec_YOUR_SIGNING_SECRET
-CLAUDE_URL=https://api.anthropic.com/v1/claude_code/routines/trig_YOUR_ROUTINE_ID/fire
-CLAUDE_KEY=sk-ant-oat01-YOUR_TOKEN
+# Grok automation: https://grok.com/webhook/automation/<trigger id>
+GROK_URL=https://example.invalid/replace-with-your-grok-webhook
+GROK_SECRET=whsec_replace-with-your-signing-secret
+# Claude Code routine: https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire
+CLAUDE_URL=https://example.invalid/replace-with-your-claude-routine
+CLAUDE_KEY=replace-with-your-sk-ant-oat01-token
 
-# PIN=4821
+# PIN=a-long-one-word-pin
 # Local testing with plain curl only; never in production:
 # TWILIO_VERIFY=false

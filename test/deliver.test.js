@@ -77,13 +77,13 @@ test('missing config, rejections and network errors are reported, never thrown o
   assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f }), { route: 'a', ok: false, status: 401, error: 'rejected' });
   assert.equal(f.calls.length, 1);
   const boom = async () => { throw new Error('boom'); };
-  assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: boom }), { route: 'a', ok: false, error: 'boom' });
+  assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: boom }), { route: 'a', ok: false, error: 'request failed (Error)' });
 });
 
 test('a malformed signing secret is reported, not thrown, and nothing is sent', async () => {
   const f = fakeFetch();
   const r = await deliver(route({ auth: 'standard-webhooks' }), MSG, { U: 'https://x', K: 'whsec_abc-_def' }, { fetchImpl: f });
-  assert.deepEqual(r, { route: 'a', ok: false, error: 'K is not a valid whsec_ base64 secret' });
+  assert.deepEqual(r, { route: 'a', ok: false, error: 'K is not a valid whsec_ secret (base64, 24-64 bytes)' });
   assert.equal(f.calls.length, 0);
 });
 
@@ -100,8 +100,32 @@ test('error results never include the agent response body', async () => {
   assert.ok(!JSON.stringify(r).includes('secret message text'));
 });
 
-test('a timeout is reported by name', async () => {
+test('every request carries a timeout signal, and a timeout is reported by name', async () => {
+  const ok = fakeFetch();
+  await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: ok });
+  assert.ok(ok.calls[0].init.signal instanceof AbortSignal);
   const f = async () => { const e = new Error('aborted'); e.name = 'TimeoutError'; throw e; };
   const r = await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f });
   assert.match(r.error, /timed out/);
+});
+
+test('route URLs must be valid https (http only for localhost), and errors never quote them', async () => {
+  const f = fakeFetch();
+  const r1 = await deliver(route({}), MSG, { U: 'notaurl-SECRETPATH', K: 'k' }, { fetchImpl: f });
+  assert.deepEqual(r1, { route: 'a', ok: false, error: 'U is not a valid URL' });
+  const r2 = await deliver(route({}), MSG, { U: 'http://agent.example/SECRET', K: 'k' }, { fetchImpl: f });
+  assert.deepEqual(r2, { route: 'a', ok: false, error: 'U must be an https URL' });
+  assert.equal(f.calls.length, 0);
+  assert.equal((await deliver(route({}), MSG, { U: 'http://127.0.0.1:8899/x', K: 'k' }, { fetchImpl: f })).ok, true);
+  const leaky = async () => { throw new TypeError('fetch failed for https://agent.example/SECRET'); };
+  const r3 = await deliver(route({}), MSG, { U: 'https://agent.example/SECRET', K: 'k' }, { fetchImpl: leaky });
+  assert.ok(!JSON.stringify(r3).includes('SECRET'));
+});
+
+test('signing secrets must decode to 24-64 bytes', async () => {
+  const f = fakeFetch();
+  const short = `whsec_${Buffer.from('too-short').toString('base64')}`;
+  const r = await deliver(route({ auth: 'standard-webhooks' }), MSG, { U: 'https://x', K: short }, { fetchImpl: f });
+  assert.equal(r.ok, false);
+  assert.equal(f.calls.length, 0);
 });

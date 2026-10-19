@@ -1,6 +1,6 @@
 {
   "name": "sms-agent-router",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Text a Twilio number and route each message to the AI agent you name: \"grok ...\", \"claude ...\". A zero-dependency Cloudflare Worker.",
   "type": "module",
   "private": true,
@@ -13,7 +13,7 @@
     "sign": "node scripts/sign.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "cloudflare": {
     "bindings": {
@@ -24,13 +24,13 @@
         "description": "Phone numbers allowed to use the router, with country code, comma-separated, e.g. +12125550100."
       },
       "GROK_URL": {
-        "description": "Grok automation webhook endpoint (grok.com, Automations, Webhook trigger). Leave the placeholder if you don't use Grok."
+        "description": "Grok automation webhook endpoint (grok.com, Automations, Webhook trigger), https://grok.com/webhook/automation/... If you don't use Grok, keep the example.invalid placeholder or remove the grok route from ROUTES."
       },
       "GROK_SECRET": {
         "description": "The whsec_... signing secret shown once under the Grok webhook trigger."
       },
       "CLAUDE_URL": {
-        "description": "Claude Code routine API trigger URL (claude.ai/code/routines, Add trigger, API). Leave the placeholder if you don't use Claude."
+        "description": "Claude Code routine API trigger URL (claude.ai/code/routines, Add trigger, API), https://api.anthropic.com/v1/claude_code/routines/trig_.../fire. If you don't use Claude, keep the example.invalid placeholder or remove the claude route from ROUTES."
       },
       "CLAUDE_KEY": {
         "description": "The sk-ant-oat01-... token generated for that routine trigger (shown once)."

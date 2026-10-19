@@ -8,6 +8,14 @@
 //    { "name": "claude", "prefix": "claude", "url_env": "CLAUDE_URL", "auth": "bearer",            "key_env": "CLAUDE_KEY", "payload": "text" },
 //    { "name": "inbox",  "default": true,    "url_env": "INBOX_URL",  "auth": "bearer",            "key_env": "INBOX_KEY" }]
 
+// Thrown for mistakes in ROUTES; the message names fields, never secret values.
+export class ConfigError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
 const AUTH_TYPES = new Set(['bearer', 'standard-webhooks', 'none']);
 const PAYLOADS = new Set(['json', 'twilio', 'text']);
 const PREFIX_SHAPE = /^[a-z0-9_-]+$/i;
@@ -17,37 +25,37 @@ export function parseRoutes(raw) {
   try {
     routes = typeof raw === 'string' ? JSON.parse(raw) : raw;
   } catch {
-    throw new Error('ROUTES is not valid JSON');
+    throw new ConfigError('ROUTES is not valid JSON');
   }
-  if (!Array.isArray(routes) || routes.length === 0) throw new Error('ROUTES must be a non-empty array');
+  if (!Array.isArray(routes) || routes.length === 0) throw new ConfigError('ROUTES must be a non-empty array');
 
   let defaults = 0;
   const seen = new Set();
   const parsed = routes.map((r, i) => {
     const where = `ROUTES[${i}]`;
-    if (!r || typeof r !== 'object') throw new Error(`${where} must be an object`);
-    if (!r.name || typeof r.name !== 'string') throw new Error(`${where} needs a name`);
-    if (!r.url_env) throw new Error(`${where} (${r.name}) needs url_env`);
-    if (r.default !== undefined && typeof r.default !== 'boolean') throw new Error(`${where} (${r.name}) default must be true or false`);
+    if (!r || typeof r !== 'object') throw new ConfigError(`${where} must be an object`);
+    if (!r.name || typeof r.name !== 'string') throw new ConfigError(`${where} needs a name`);
+    if (!r.url_env) throw new ConfigError(`${where} (${r.name}) needs url_env`);
+    if (r.default !== undefined && typeof r.default !== 'boolean') throw new ConfigError(`${where} (${r.name}) default must be true or false`);
     const auth = r.auth || 'bearer';
-    if (!AUTH_TYPES.has(auth)) throw new Error(`${where} (${r.name}) has unknown auth "${auth}"`);
-    if (auth !== 'none' && !r.key_env) throw new Error(`${where} (${r.name}) needs key_env for auth "${auth}"`);
+    if (!AUTH_TYPES.has(auth)) throw new ConfigError(`${where} (${r.name}) has unknown auth "${auth}"`);
+    if (auth !== 'none' && !r.key_env) throw new ConfigError(`${where} (${r.name}) needs key_env for auth "${auth}"`);
     const payload = r.payload || 'json';
-    if (!PAYLOADS.has(payload)) throw new Error(`${where} (${r.name}) has unknown payload "${payload}"`);
+    if (!PAYLOADS.has(payload)) throw new ConfigError(`${where} (${r.name}) has unknown payload "${payload}"`);
 
     const isDefault = r.default === true;
     if (isDefault) defaults++;
     const hasPrefix = r.prefix !== undefined && r.prefix !== null && r.prefix !== '';
     if (hasPrefix && (typeof r.prefix !== 'string' || !PREFIX_SHAPE.test(r.prefix))) {
-      throw new Error(`${where} (${r.name}) prefix must be one word (letters, digits, - or _)`);
+      throw new ConfigError(`${where} (${r.name}) prefix must be one word (letters, digits, - or _)`);
     }
-    if (!hasPrefix && !isDefault) throw new Error(`${where} (${r.name}) needs a prefix, or "default": true`);
+    if (!hasPrefix && !isDefault) throw new ConfigError(`${where} (${r.name}) needs a prefix, or "default": true`);
     const prefix = hasPrefix ? r.prefix.toLowerCase() : null;
-    if (prefix && seen.has(prefix)) throw new Error(`prefix "${prefix}" is used twice`);
+    if (prefix && seen.has(prefix)) throw new ConfigError(`prefix "${prefix}" is used twice`);
     if (prefix) seen.add(prefix);
     return { name: r.name, prefix, isDefault, urlEnv: r.url_env, keyEnv: r.key_env || null, auth, payload };
   });
-  if (defaults > 1) throw new Error('only one route can be the default');
+  if (defaults > 1) throw new ConfigError('only one route can be the default');
   return parsed;
 }
 
