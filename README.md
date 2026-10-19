@@ -1,32 +1,36 @@
 # sms-agent-router
 
-Text one phone number, reach whichever AI agent you name.
+**Text one number. The first word picks the AI agent.**
 
-```
-grok what moved in my portfolio today   ->  Grok
-claude summarize the PR I just opened   ->  Claude
-```
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/hero-narrow-dark.svg">
+  <source media="(max-width: 600px)" srcset="docs/hero-narrow-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/hero-wide-dark.svg">
+  <img src="docs/hero-wide-light.svg" width="100%" alt="Your text starting with grok goes to Grok and your text starting with claude goes to Claude; a stranger's text is dropped at the router.">
+</picture>
 
-A Twilio number receives the text. A small Cloudflare Worker checks that it really came from Twilio and from you, reads the first word, strips it, and hands the rest to that agent's webhook. The agent does the work and replies however it normally does.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jtannahill/sms-agent-router)
 
-No runtime dependencies, one Worker, about 300 lines, 38 tests.
+The button copies this repo to your GitHub and deploys it; then add your secrets ([Setup](#setup), step 3) and point Twilio at it. Or [set it up by hand](#before-you-start).
 
-## How it works
+Your Twilio number receives the text. A small Cloudflare Worker checks that it really came from Twilio and from you, reads the first word, strips it, and hands the rest to the agent that word names. The agent does the work and answers however it normally does. No runtime dependencies, one Worker, 40 tests.
 
-```
-your phone --SMS--> Twilio --POST /sms--> sms-agent-router --webhook--> agent
-                                           1. verify X-Twilio-Signature (403 if bad)
-                                           2. sender in OWNER_NUMBERS?
-                                           3. optional PIN
-                                           4. optional replay guard (MessageSid)
-                                           5. first word picks the route
-                                           6. answer Twilio with TwiML, deliver in the background
-```
+## What happens to a text
 
-- **A prefix is a whole leading word.** `grok hi`, `Grok: hi` and `@grok, hi` all reach `grok` as `hi`. `grokking`, `grokémon` and `ask grok` do not. Line breaks in the message are kept. A bare prefix with nothing after it (and no picture) is ignored.
-- **Nothing matches?** The text goes to your `default` route if you set one. Otherwise you get a one-line text back listing the prefixes.
-- **Twilio gets a 200 for every request with a valid signature**, even on a config error, so a broken setup never turns into retries or debugger noise. Anything that is not a form post, or has a missing or wrong signature, gets a 403.
-- **No retries to agents.** Most agent endpoints start a new run per request and have no idempotency key, so a retry would run the agent twice. Failures are logged instead (see `npm run tail`).
+- **The first word is the address.** `grok hi`, `Grok: hi` and `@grok, hi` all reach `grok` as `hi`. `grokking`, `grokémon` and `ask grok` do not. Line breaks are kept; a bare prefix with nothing after it is ignored.
+- **Only you get through.** Requests without Twilio's signature get a 403, texts from numbers not in `OWNER_NUMBERS` are ignored, and an optional PIN and replay guard add two more locks.
+- **No prefix?** The text goes to your `default` route if you set one; otherwise you get a one-line reply listing the prefixes.
+- **Twilio always hears back at once** (200 with empty TwiML) while the agent is called in the background, so a slow agent never makes Twilio retry.
+- **Agents are never called twice.** Most agent endpoints start a new run per request with no idempotency key, so failures are logged, not retried.
+
+This is a real local run: two texts from the owner's number, one from a stranger, and one forged request.
+
+<picture>
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/real-run-narrow-dark.png">
+  <source media="(max-width: 600px)" srcset="docs/real-run-narrow-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/real-run-wide-dark.png">
+  <img src="docs/real-run-wide-light.png" width="100%" alt="Router log: grok delivered (202), claude delivered (202), a stranger's text ignored, a forged request answered 403. Claude received a bearer key and the text; Grok received a signed JSON payload with the text.">
+</picture>
 
 ## Before you start
 
@@ -41,8 +45,10 @@ your phone --SMS--> Twilio --POST /sms--> sms-agent-router --webhook--> agent
 ```sh
 git clone https://github.com/jtannahill/sms-agent-router
 cd sms-agent-router
-npm test                      # no install needed
+npm test
 ```
+
+The tests need no install.
 
 1. **Choose your routes.** Edit `ROUTES` in `wrangler.toml` (fields below). It is JSON inside a TOML `'''` block: double quotes, no trailing commas, no comments. If it is not valid JSON, every text is dropped and `npm run tail` shows `ROUTES is not valid JSON`.
 
