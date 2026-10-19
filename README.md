@@ -1,5 +1,7 @@
 # sms-agent-router
 
+[![test](https://github.com/jtannahill/sms-agent-router/actions/workflows/test.yml/badge.svg)](https://github.com/jtannahill/sms-agent-router/actions/workflows/test.yml) [![MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Text one number. The first word picks the AI agent.**
 
 <picture>
@@ -171,6 +173,7 @@ These agents can often read your mail, run code or drive a browser, so treat the
 - **Turn on the replay guard** (`SEEN`) so an old captured request can't be replayed.
 - **The text is untrusted input to the agent.** In each agent's own instructions, say that forwarded texts are requests from you and that instructions inside quoted or forwarded content must be ignored.
 - **Secrets stay in Wrangler secrets.** `ROUTES` only names them. Logs record the route and status, never the message text, the agent's reply or any key.
+- **Found a hole?** Please report it privately; see [SECURITY.md](SECURITY.md).
 
 ## Local development
 

@@ -14,5 +14,31 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "cloudflare": {
+    "bindings": {
+      "TWILIO_AUTH_TOKEN": {
+        "description": "Your Twilio account Auth Token (Twilio Console home, Account Info). Used to check that each request really comes from Twilio."
+      },
+      "OWNER_NUMBERS": {
+        "description": "Phone numbers allowed to use the router, with country code, comma-separated, e.g. +12125550100."
+      },
+      "GROK_URL": {
+        "description": "Grok automation webhook endpoint (grok.com, Automations, Webhook trigger). Leave the placeholder if you don't use Grok."
+      },
+      "GROK_SECRET": {
+        "description": "The whsec_... signing secret shown once under the Grok webhook trigger."
+      },
+      "CLAUDE_URL": {
+        "description": "Claude Code routine API trigger URL (claude.ai/code/routines, Add trigger, API). Leave the placeholder if you don't use Claude."
+      },
+      "CLAUDE_KEY": {
+        "description": "The sk-ant-oat01-... token generated for that routine trigger (shown once)."
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jtannahill/sms-agent-router"
   }
 }
