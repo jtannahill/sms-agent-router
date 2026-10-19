@@ -123,3 +123,83 @@ test('owner numbers match by digits, whatever the formatting', async () => {
   await handleSms(await smsRequest({ From: '', Body: 'grok hi' }), { ...ENV, OWNER_NUMBERS: '' }, null, { fetchImpl: f });
   assert.equal(f.calls.length, 1);
 });
+
+test('with a PIN, line breaks in the message survive', async () => {
+  const f = fakeFetch();
+  await handleSms(await smsRequest({ From: OWNER, Body: '4821 grok line one\n\nline   two' }), { ...ENV, PIN: '4821' }, null, { fetchImpl: f });
+  assert.equal(JSON.parse(f.calls[0].init.body).Body, 'line one\n\nline   two');
+});
+
+test('a text that is only the PIN, or empty, is ignored', async () => {
+  const f = fakeFetch();
+  await handleSms(await smsRequest({ From: OWNER, Body: '4821' }), { ...ENV, PIN: '4821' }, null, { fetchImpl: f });
+  await handleSms(await smsRequest({ From: OWNER, Body: '   ' }), ENV, null, { fetchImpl: f });
+  assert.equal(f.calls.length, 0);
+});
+
+test('a query string is part of the signed URL', async () => {
+  const f = fakeFetch();
+  const url = `${URL_}?tenant=a`;
+  const good = await smsRequest({ From: OWNER, Body: 'grok hi' }, { url });
+  assert.equal((await handleSms(good, ENV, null, { fetchImpl: f })).status, 200);
+  const params = { MessageSid: 'SM1', To: '+15185550199', NumMedia: '0', From: OWNER, Body: 'grok hi' };
+  const signedWithout = await twilioSignature(ENV.TWILIO_AUTH_TOKEN, URL_, params);
+  const bad = new Request(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-twilio-signature': signedWithout }, body: new URLSearchParams(params).toString() });
+  assert.equal((await handleSms(bad, ENV, null, { fetchImpl: f })).status, 403);
+});
+
+test('missing TWILIO_AUTH_TOKEN rejects; TWILIO_VERIFY=false skips the check', async () => {
+  const f = fakeFetch();
+  const req = () => smsRequest({ From: OWNER, Body: 'grok hi' });
+  assert.equal((await handleSms(await req(), { ...ENV, TWILIO_AUTH_TOKEN: '' }, null, { fetchImpl: f })).status, 403);
+  const unsigned = await smsRequest({ From: OWNER, Body: 'grok hi' }, { sign: false });
+  assert.equal((await handleSms(unsigned, { ...ENV, TWILIO_VERIFY: 'false' }, null, { fetchImpl: f })).status, 200);
+  assert.equal(f.calls.length, 1);
+});
+
+test('REPLY_ON_NO_MATCH=false stays silent; a default route catches unprefixed texts', async () => {
+  const f = fakeFetch();
+  const quiet = await handleSms(await smsRequest({ From: OWNER, Body: 'hello' }), { ...ENV, REPLY_ON_NO_MATCH: 'false' }, null, { fetchImpl: f });
+  assert.equal(await quiet.text(), '<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  const routes = JSON.parse(ENV.ROUTES).concat({ name: 'inbox', default: true, url_env: 'INBOX_URL', key_env: 'INBOX_KEY' });
+  await handleSms(await smsRequest({ From: OWNER, Body: 'hello' }), { ...ENV, ROUTES: JSON.stringify(routes), INBOX_URL: 'https://inbox.example', INBOX_KEY: 'ik' }, null, { fetchImpl: f });
+  assert.equal(f.calls[0].url, 'https://inbox.example');
+  assert.equal(JSON.parse(f.calls[0].init.body).text, 'hello');
+});
+
+test('ACK replaces every {agent}, does not expand $ patterns, and is XML-escaped', async () => {
+  const f = fakeFetch();
+  const res = await handleSms(await smsRequest({ From: OWNER, Body: 'grok hi' }), { ...ENV, ACK: '{agent} <ok> & {agent} $&' }, null, { fetchImpl: f });
+  assert.match(await res.text(), /<Message>grok &lt;ok&gt; &amp; grok \$&amp;<\/Message>/);
+});
+
+test('with a SEEN KV namespace, a repeated MessageSid is delivered once', async () => {
+  const f = fakeFetch();
+  const store = new Map();
+  const SEEN = { get: async (k) => store.get(k) ?? null, put: async (k, v, o) => { store.set(k, v); assert.equal(o.expirationTtl, 86400); } };
+  const env = { ...ENV, SEEN };
+  await handleSms(await smsRequest({ From: OWNER, Body: 'grok hi', MessageSid: 'SMdup' }), env, null, { fetchImpl: f });
+  await handleSms(await smsRequest({ From: OWNER, Body: 'grok hi', MessageSid: 'SMdup' }), env, null, { fetchImpl: f });
+  assert.equal(f.calls.length, 1);
+});
+
+test('the delivery is handed to ctx.waitUntil', async () => {
+  const f = fakeFetch();
+  const jobs = [];
+  await handleSms(await smsRequest({ From: OWNER, Body: 'grok hi' }), ENV, { waitUntil: (p) => jobs.push(p) }, { fetchImpl: f });
+  assert.equal(jobs.length, 1);
+  assert.deepEqual(await jobs[0], { route: 'grok', ok: true, status: 200 });
+});
+
+test('a non-form request gets a 403 before anything is parsed', async () => {
+  const f = fakeFetch();
+  const req = new Request(URL_, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal((await handleSms(req, ENV, null, { fetchImpl: f })).status, 403);
+  assert.equal(f.calls.length, 0);
+});
+
+test('a bare prefix with nothing after it is ignored', async () => {
+  const f = fakeFetch();
+  await handleSms(await smsRequest({ From: OWNER, Body: 'grok' }), ENV, null, { fetchImpl: f });
+  assert.equal(f.calls.length, 0);
+});

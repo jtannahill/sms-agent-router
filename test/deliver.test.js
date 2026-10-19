@@ -61,18 +61,47 @@ test('twilio and text payload shapes', () => {
   assert.deepEqual(buildPayload('text', MSG), { text: `SMS from ${MSG.from}\n\nhello\nAttachment: ${MSG.mediaUrls[0]}` });
 });
 
-test('Claude routine URLs get the anthropic-version header', async () => {
+test('Claude routine URLs get the anthropic version and beta headers; others do not', async () => {
   const f = fakeFetch();
   await deliver(route({ payload: 'text' }), MSG, { U: 'https://api.anthropic.com/v1/claude_code/routines/trig_1/fire', K: 'k' }, { fetchImpl: f });
   assert.equal(f.calls[0].init.headers['anthropic-version'], '2023-06-01');
+  assert.equal(f.calls[0].init.headers['anthropic-beta'], 'experimental-cc-routine-2026-04-01');
+  await deliver(route({}), MSG, { U: 'https://agent.example/hook', K: 'k' }, { fetchImpl: f });
+  assert.equal(f.calls[1].init.headers['anthropic-version'], undefined);
 });
 
 test('missing config, rejections and network errors are reported, never thrown or retried', async () => {
   const f = fakeFetch(401);
   assert.deepEqual(await deliver(route({}), MSG, { K: 'k' }, { fetchImpl: f }), { route: 'a', ok: false, error: 'U is not set' });
   assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x' }, { fetchImpl: f }), { route: 'a', ok: false, error: 'K is not set' });
-  assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f }), { route: 'a', ok: false, status: 401, error: 'nope' });
+  assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f }), { route: 'a', ok: false, status: 401, error: 'rejected' });
   assert.equal(f.calls.length, 1);
   const boom = async () => { throw new Error('boom'); };
   assert.deepEqual(await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: boom }), { route: 'a', ok: false, error: 'boom' });
+});
+
+test('a malformed signing secret is reported, not thrown, and nothing is sent', async () => {
+  const f = fakeFetch();
+  const r = await deliver(route({ auth: 'standard-webhooks' }), MSG, { U: 'https://x', K: 'whsec_abc-_def' }, { fetchImpl: f });
+  assert.deepEqual(r, { route: 'a', ok: false, error: 'K is not a valid whsec_ base64 secret' });
+  assert.equal(f.calls.length, 0);
+});
+
+test('redirects are not followed and count as failures', async () => {
+  const f = fakeFetch(302);
+  const r = await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f });
+  assert.deepEqual(r, { route: 'a', ok: false, status: 302, error: 'redirect not followed' });
+  assert.equal(f.calls[0].init.redirect, 'manual');
+});
+
+test('error results never include the agent response body', async () => {
+  const f = async () => ({ ok: false, status: 500, text: async () => 'echo: secret message text' });
+  const r = await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f });
+  assert.ok(!JSON.stringify(r).includes('secret message text'));
+});
+
+test('a timeout is reported by name', async () => {
+  const f = async () => { const e = new Error('aborted'); e.name = 'TimeoutError'; throw e; };
+  const r = await deliver(route({}), MSG, { U: 'https://x', K: 'k' }, { fetchImpl: f });
+  assert.match(r.error, /timed out/);
 });

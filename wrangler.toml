@@ -5,16 +5,27 @@ compatibility_date = "2026-06-18"
 [observability]
 enabled = true
 
-# Non-secret settings. Secrets (TWILIO_AUTH_TOKEN, each route's key, OWNER_NUMBERS,
-# PIN) go in with `wrangler secret put NAME`, never in this file.
+# Non-secret settings. Secrets (TWILIO_AUTH_TOKEN, OWNER_NUMBERS, PIN, and each
+# route's URL and key) go in with `npx wrangler secret put NAME`, never here.
 [vars]
-# Which agent each prefix reaches. url_env / key_env name the secrets that hold
-# the endpoint and its credential. See README for the fields.
+# ROUTES is JSON inside a TOML multi-line string ('''...'''): keep it valid
+# JSON (double quotes, no trailing commas, no comments). Every url_env and
+# key_env names a secret you must create with exactly that name.
 ROUTES = '''
 [
   { "name": "grok",   "prefix": "grok",   "url_env": "GROK_URL",   "auth": "standard-webhooks", "key_env": "GROK_SECRET" },
   { "name": "claude", "prefix": "claude", "url_env": "CLAUDE_URL", "auth": "bearer",            "key_env": "CLAUDE_KEY", "payload": "text" }
 ]
 '''
-# Optional: reply to every routed text, e.g. "Sent to {agent}". Empty = silent.
+# Optional: text back after routing, e.g. "Sent to {agent}". Empty = silent.
+# Each reply is an outbound SMS that Twilio bills.
 ACK = ""
+# REPLY_ON_NO_MATCH = "false"          # stay silent when no prefix matches
+# PUBLIC_URL = "https://sms.example.com"  # only behind a custom domain or proxy
+
+# Optional replay guard: drop a repeated MessageSid for 24 hours.
+# Create it with `npx wrangler kv namespace create SEEN`, then uncomment
+# and paste the id it prints.
+# [[kv_namespaces]]
+# binding = "SEEN"
+# id = "<paste id>"

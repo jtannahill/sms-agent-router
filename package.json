@@ -7,8 +7,12 @@
   "license": "MIT",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "npx wrangler@4 dev",
+    "deploy": "npx wrangler@4 deploy",
+    "tail": "npx wrangler@4 tail",
+    "sign": "node scripts/sign.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

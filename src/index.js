@@ -1,9 +1,9 @@
 // sms-agent-router: a Twilio number in front of several AI agents.
 // Text "grok ..." and Grok gets it; text "claude ..." and Claude gets it.
 //
-// POST /sms is the Twilio Messaging webhook. Every request is checked, then
-// answered with empty TwiML (so Twilio never retries) while the delivery runs
-// in the background.
+// POST /sms is the Twilio Messaging webhook. A request with a bad signature
+// gets a 403; every other request gets 200 TwiML right away, while the
+// delivery runs in the background.
 
 import { parseRoutes, matchRoute } from './routes.js';
 import { verifyTwilio, EMPTY_TWIML, twimlMessage } from './twilio.js';
@@ -11,8 +11,10 @@ import { deliver } from './deliver.js';
 import { safeEqual } from './crypto.js';
 
 const xml = (body, status = 200) => new Response(body, { status, headers: { 'content-type': 'text/xml' } });
+const SEEN_TTL_SECONDS = 86400;
 
-// Numbers compare by digits only, so "+1 (212) 555-0100" and "+12125550100" match.
+// Numbers compare by digits only, so "+1 (212) 555-0100" matches "+12125550100".
+// Include the country code: "2125550100" does not match "+12125550100".
 const digits = (n) => String(n || '').replace(/\D/g, '');
 
 function isOwner(from, env) {
@@ -21,26 +23,43 @@ function isOwner(from, env) {
 }
 
 // With PIN set, a text must start with it: "4821 grok what's new". The PIN is
-// removed before routing. Returns the rest of the text, or null on a mismatch.
+// removed before routing; line breaks in the rest are kept. Returns the rest
+// of the text, or null on a mismatch.
 function checkPin(text, pin) {
   if (!pin) return text;
-  const [first, ...rest] = text.trim().split(/\s+/);
-  return first && safeEqual(first, pin) ? rest.join(' ') : null;
+  const m = text.trimStart().match(/^(\S+)\s*([\s\S]*)$/);
+  return m && safeEqual(m[1], pin) ? m[2] : null;
+}
+
+// Optional replay guard. Twilio signatures carry no timestamp, so a captured
+// request could be resent. With a KV namespace bound as SEEN, each MessageSid
+// is accepted once per day. Best effort: KV is eventually consistent, so a
+// replay within about a minute, or from another region, can still get through.
+async function firstDelivery(env, sid) {
+  if (!env.SEEN || !sid) return true;
+  const key = `sid:${sid}`;
+  if (await env.SEEN.get(key)) return false;
+  await env.SEEN.put(key, '1', { expirationTtl: SEEN_TTL_SECONDS });
+  return true;
 }
 
 export async function handleSms(request, env, ctx, deps = {}) {
+  // Twilio always posts a form. Anything else is not Twilio.
+  if (!(request.headers.get('content-type') || '').startsWith('application/x-www-form-urlencoded')) {
+    return new Response('expected a Twilio form post', { status: 403 });
+  }
   const form = await request.formData();
   const params = Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)]));
 
   if (env.TWILIO_VERIFY !== 'false') {
-    const url = env.PUBLIC_URL ? new URL(new URL(request.url).pathname + new URL(request.url).search, env.PUBLIC_URL).toString() : request.url;
+    const self = new URL(request.url);
+    const url = env.PUBLIC_URL ? new URL(self.pathname + self.search, env.PUBLIC_URL).toString() : request.url;
     const ok = await verifyTwilio({ authToken: env.TWILIO_AUTH_TOKEN, url, params, signature: request.headers.get('x-twilio-signature') });
     if (!ok) return new Response('invalid signature', { status: 403 });
   }
 
-  const from = params.From || '';
-  if (!isOwner(from, env)) {
-    console.log(`[router] ignored text from a number not in OWNER_NUMBERS`);
+  if (!isOwner(params.From, env)) {
+    console.log('[router] ignored text from a number not in OWNER_NUMBERS');
     return xml(EMPTY_TWIML);
   }
 
@@ -49,17 +68,25 @@ export async function handleSms(request, env, ctx, deps = {}) {
     console.log('[router] ignored text without the PIN');
     return xml(EMPTY_TWIML);
   }
+  if (!afterPin.trim() && !Number(params.NumMedia || 0)) return xml(EMPTY_TWIML);
+
+  if (!(await firstDelivery(env, params.MessageSid))) {
+    console.log('[router] ignored a repeat of an earlier MessageSid');
+    return xml(EMPTY_TWIML);
+  }
 
   const routes = parseRoutes(env.ROUTES);
   const match = matchRoute(afterPin, routes);
   if (!match) {
+    if (env.REPLY_ON_NO_MATCH === 'false') return xml(EMPTY_TWIML);
     const names = routes.filter((r) => r.prefix).map((r) => r.prefix).join(', ');
-    return xml(env.REPLY_ON_NO_MATCH === 'false' ? EMPTY_TWIML : twimlMessage(`Start your text with one of: ${names}`));
+    return xml(twimlMessage(`Start your text with one of: ${names}`));
   }
 
   const count = Number(params.NumMedia || 0);
+  if (!match.text && !count) return xml(EMPTY_TWIML);
   const msg = {
-    from,
+    from: params.From,
     to: params.To || '',
     text: match.text,
     messageSid: params.MessageSid || '',
@@ -69,13 +96,13 @@ export async function handleSms(request, env, ctx, deps = {}) {
 
   const job = deliver(match.route, msg, env, deps).then((r) => {
     if (r.ok) console.log(`[router] ${r.route}: delivered (${r.status})`);
-    else console.error(`[router] ${r.route}: failed ${r.status || ''} ${r.error || ''}`.trim());
+    else console.error(`[router] ${r.route}: failed${r.status ? ` (${r.status})` : ''}: ${r.error}`);
     return r;
   });
   if (ctx?.waitUntil) ctx.waitUntil(job);
   else await job;
 
-  return xml(env.ACK ? twimlMessage(env.ACK.replace('{agent}', match.route.name)) : EMPTY_TWIML);
+  return xml(env.ACK ? twimlMessage(env.ACK.replaceAll('{agent}', () => match.route.name)) : EMPTY_TWIML);
 }
 
 export default {
@@ -87,7 +114,8 @@ export default {
         return await handleSms(request, env, ctx);
       } catch (err) {
         console.error('[router] error:', err.message);
-        // Still 200 with empty TwiML: a 5xx makes Twilio retry the webhook.
+        // Answer 200 anyway: an error status only adds Twilio debugger noise,
+        // and nothing about this request will succeed on a second try.
         return xml(EMPTY_TWIML);
       }
     }

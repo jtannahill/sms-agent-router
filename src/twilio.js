@@ -6,6 +6,8 @@
 
 import { enc, hmacBase64, safeEqual } from './crypto.js';
 
+// params is a plain object. Twilio's Messaging webhooks never repeat a field
+// name, so one value per name is all that is needed here.
 export async function twilioSignature(authToken, url, params) {
   const data = Object.keys(params).sort().reduce((acc, k) => acc + k + params[k], url);
   return hmacBase64('SHA-1', enc.encode(authToken), data);
@@ -19,6 +21,10 @@ export async function verifyTwilio({ authToken, url, params, signature }) {
 export const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 
 export function twimlMessage(text) {
-  const safe = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safe = String(text)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
   return `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safe}</Message></Response>`;
 }

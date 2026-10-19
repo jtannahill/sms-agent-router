@@ -1,9 +1,15 @@
-# Copy to .dev.vars for `wrangler dev`. In production use `wrangler secret put`.
-TWILIO_AUTH_TOKEN=
+# Copy to .dev.vars for `npm run dev`. Production uses `npx wrangler secret put`.
+# Every url_env / key_env named in ROUTES (wrangler.toml) needs a value here,
+# or deliveries to that route fail with "<NAME> is not set".
+
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
 OWNER_NUMBERS=+12125550100
-GROK_URL=
-GROK_SECRET=
-CLAUDE_URL=
-CLAUDE_KEY=
+
+GROK_URL=https://grok.com/webhook/automation/YOUR_TRIGGER_ID
+GROK_SECRET=whsec_YOUR_SIGNING_SECRET
+CLAUDE_URL=https://api.anthropic.com/v1/claude_code/routines/trig_YOUR_ROUTINE_ID/fire
+CLAUDE_KEY=sk-ant-oat01-YOUR_TOKEN
+
 # PIN=4821
-# TWILIO_VERIFY=false   # local testing only; never in production
+# Local testing with plain curl only; never in production:
+# TWILIO_VERIFY=false

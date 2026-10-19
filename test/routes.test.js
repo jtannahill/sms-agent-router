@@ -38,7 +38,7 @@ test('config errors are explicit', () => {
   assert.throws(() => parseRoutes([]), /non-empty/);
   assert.throws(() => parseRoutes([{ name: 'a', prefix: 'a' }]), /url_env/);
   assert.throws(() => parseRoutes([{ name: 'a', prefix: 'a', url_env: 'U' }]), /key_env/);
-  assert.throws(() => parseRoutes([{ name: 'a', prefix: 'two words', url_env: 'U', key_env: 'K' }]), /one-word prefix/);
+  assert.throws(() => parseRoutes([{ name: 'a', prefix: 'two words', url_env: 'U', key_env: 'K' }]), /one word/);
   assert.throws(() => parseRoutes([{ name: 'a', prefix: 'a', url_env: 'U', auth: 'basic', key_env: 'K' }]), /unknown auth/);
   assert.throws(
     () => parseRoutes([
@@ -55,4 +55,32 @@ test('config errors are explicit', () => {
     /only one route/,
   );
   assert.doesNotThrow(() => parseRoutes([{ name: 'open', prefix: 'o', url_env: 'U', auth: 'none' }]));
+});
+
+test('accented letters and digits after a prefix keep it from matching', () => {
+  assert.equal(matchRoute('grokémon go', ROUTES), null);
+  assert.equal(matchRoute('grok2 hi', ROUTES), null);
+});
+
+test('only spaces, colons and commas are stripped after a prefix', () => {
+  assert.equal(matchRoute('grok -5 degrees out', ROUTES).text, '-5 degrees out');
+  assert.equal(matchRoute('grok\nline one\nline two', ROUTES).text, 'line one\nline two');
+});
+
+test('prefixes with - and _ work, and a shorter prefix does not steal a longer one', () => {
+  const routes = parseRoutes([
+    { name: 'g', prefix: 'g', url_env: 'U', key_env: 'K' },
+    { name: 'my-bot', prefix: 'my-bot', url_env: 'U', key_env: 'K' },
+    { name: 'grok', prefix: 'grok', url_env: 'U', key_env: 'K' },
+  ]);
+  assert.equal(matchRoute('grok hi', routes).route.name, 'grok');
+  assert.equal(matchRoute('g hi', routes).route.name, 'g');
+  assert.equal(matchRoute('my-bot: hi', routes).route.name, 'my-bot');
+  assert.equal(matchRoute('my hi', routes), null);
+});
+
+test('default must be a real boolean and a present prefix is always checked', () => {
+  assert.throws(() => parseRoutes([{ name: 'a', default: 'false', url_env: 'U', key_env: 'K' }]), /true or false/);
+  assert.throws(() => parseRoutes([{ name: 'a', default: true, prefix: 'two words', url_env: 'U', key_env: 'K' }]), /one word/);
+  assert.throws(() => parseRoutes([{ name: 'a', prefix: 5, url_env: 'U', key_env: 'K' }]), /one word/);
 });
